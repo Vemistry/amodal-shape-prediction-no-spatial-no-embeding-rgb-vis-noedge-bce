@@ -1,24 +1,29 @@
-# 1. CHẶN BOM NẶNG KÝ (QUAN TRỌNG NHẤT KHÔNG ĐƯỢC QUÊN)
-checkpoints/
-*.pth
-*.pt
-*.weights
-
-# 2. BỎ QUA DATASET VÀ FILE NÉN
-data/
-*.zip
-*.tar
-*.gz
-
-# 3. BỎ QUA RÁC CỦA PYTHON & COLAB
+# Môi trường Python
 __pycache__/
-__.gradio__/
-*.pyc
-.ipynb_checkpoints/
-__MACOSX/
-
-# 4. BỎ QUA MÔI TRƯỜNG ẢO VÀ CẤU HÌNH CÁ NHÂN
+*.py[cod]
+*$py.class
 venv/
-env/
 .env
+env/
+
+# Thư mục chứa dữ liệu (Không đẩy data lên Git)
+data/
+dataset/
+
+# Thư mục chứa model checkpoints (Tránh đẩy file .pt, .pth lên Git vì quá nặng)
+checkpoints/*.pt
+checkpoints/*.pth
+models/
+
+# Kết quả chạy (Outputs)
+results/
+runs/
+*.png
+*.jpg
+*.json
+!COCO_amodal_val2014.json # Nếu bạn muốn giữ lại file annotation nhỏ (tuỳ chọn)
+
+# IDE / OS files
 .vscode/
+.idea/
+.DS_Store

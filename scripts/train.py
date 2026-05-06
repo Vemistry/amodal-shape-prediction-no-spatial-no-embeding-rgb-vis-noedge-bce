@@ -128,8 +128,12 @@ def train():
     # Nếu có checkpoint, tiếp tục từ epoch đó
     if RESUME_EPOCH > 0:
         weight_path = f"../checkpoints/swin_amodal_epoch_{RESUME_EPOCH}.pth"
-        model.load_state_dict(torch.load(weight_path, map_location=DEVICE))
-        print(f"\n🔄 Tiếp tục từ Epoch {RESUME_EPOCH}: Đã nạp trọng số từ checkpoint!")
+        if os.path.exists(weight_path):
+            model.load_state_dict(torch.load(weight_path, map_location=DEVICE))
+            print(f"\n🔄 Tiếp tục từ Epoch {RESUME_EPOCH}: Đã nạp trọng số từ checkpoint!")
+        else:
+            print(f"\n⚠️ Không tìm thấy checkpoint tại {weight_path}. Tự động bắt đầu từ Epoch 0!")
+            RESUME_EPOCH = 0
 
     # ─────────────────────────────────────────────────────────────────
     # LOSS FUNCTION & OPTIMIZER
