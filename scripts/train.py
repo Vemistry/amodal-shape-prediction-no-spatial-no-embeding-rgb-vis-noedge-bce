@@ -148,7 +148,7 @@ def train():
     os.makedirs("../checkpoints", exist_ok=True)
 
     # ─────────────────────────────────────────────────────────────────
-    # VÒNG LẶPHUẤN LUYỆN CHÍNH
+    # VÒNG LẶP HUẤN LUYỆN CHÍNH
     # ─────────────────────────────────────────────────────────────────
     print(f"\n🔥 BẮT ĐẦU HUẤN LUYỆN: Epoch {RESUME_EPOCH + 1} → {EPOCHS} 🔥")
     print("=" * 70)

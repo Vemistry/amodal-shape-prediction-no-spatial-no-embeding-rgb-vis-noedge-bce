@@ -1,8 +1,8 @@
 """
 ===================================================================================
-MÔ HÌNH AMODAL SWIN-UNET - Dự đoán hình dạng toàn bộ của vật thể che khuất
+MÔ HÌNH AMODAL SWIN-UNET - Dự đoán hình dạng toàn bộ của vật thể bị che khuất
 ===================================================================================
-Kiến trúc: Swin Transformer Encoder (5 kênh) + U-Net Decoder + Spatial Attention
+Kiến trúc: Swin Transformer Encoder (5 kênh) + U-Net Decoder
 - Nhập liệu: RGB (3) + Visible mask (1) + Edge mask (1) + Class ID
 - Đầu ra: Amodal mask (1)
 - Ứng dụng: Hoàn thiện hình dạng của vật thể bị che khuất bằng các vật thể khác
@@ -103,14 +103,9 @@ class AmodalSwinUNet(nn.Module):
     2. EMBEDDING NHÃN: Chuyển đổi class ID thành vector nhúng
        - Hỗ trợ 91 loại vật thể COCO
        - Nhúng vào bottleneck của U-Net
-    
     3. DECODER: Khôi phục độ phân giải gốc
        - Sử dụng skip connections từ encoder
        - Gồm 3 lớp up-sampling
-    
-    4. SPATIAL ATTENTION: Tập trung vào vùng quan trọng
-       - Cơ chế chú ý không gian
-       - Tăng độ chính xác dự đoán
     
     Args:
         model_name: Tên mô hình encoder từ timm (mặc định: swin_tiny_patch4_window7_224)
@@ -175,8 +170,7 @@ class AmodalSwinUNet(nn.Module):
         1. Encoder: Trích xuất đặc trưng phân cấp
         2. Nhúng nhãn vào bottleneck
         3. Decoder: Khôi phục độ phân giải
-        4. Spatial Attention: Tập trung vào vùng quan trọng
-        5. Final Conv: Tạo ra dự đoán cuối cùng
+        4. Final Conv: Tạo ra dự đoán cuối cùng
         
         Args:
             x: Ảnh 5 kênh [Batch, 5, 224, 224]
@@ -252,7 +246,7 @@ if __name__ == "__main__":
         output = model(dummy_input, dummy_class)
         
     # In kết quả
-    print(f"✅ Kiến trúc Swin-UNet 5 kênh + Nhúng nhãn + Spatial Attention hoạt động OK!")
+    print(f"✅ Kiến trúc Swin-UNet 5 kênh + Nhúng nhãn hoạt động OK!")
     print(f"Đầu vào (Ảnh):    {dummy_input.shape}")
     print(f"Đầu vào (Nhãn):   {dummy_class.shape}")
     print(f"Đầu ra (Mask):    {output.shape} (Phải là [2, 1, 224, 224])")
