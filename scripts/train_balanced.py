@@ -159,14 +159,13 @@ def train(args):
             desc=f"Epoch {epoch+1}/{args.epochs}",
         )
 
-        for batch_idx, (inputs, targets, occluded, class_ids) in progress_bar:
+        for batch_idx, (inputs, targets, occluded, _) in progress_bar:
             inputs = inputs.to(DEVICE)
             targets = targets.unsqueeze(1).float().to(DEVICE)
             occluded = occluded.unsqueeze(1).float().to(DEVICE)
-            class_ids = class_ids.to(DEVICE)
 
             # Forward pass
-            outputs = model(inputs, class_ids)
+            outputs = model(inputs)
             loss = criterion(outputs, targets, occluded)
 
             # Gradient accumulation

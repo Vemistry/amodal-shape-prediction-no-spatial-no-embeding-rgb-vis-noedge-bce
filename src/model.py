@@ -4,7 +4,7 @@ MÔ HÌNH AMODAL SWIN-UNET - Dự đoán hình dạng toàn bộ của vật th�
 ===================================================================================
 Kiến trúc: Swin Transformer Encoder (5 kênh) + U-Net Decoder
 - Nhập liệu: RGB (3) + Visible mask (1) + Edge mask (1) + Class ID
-- Đầu ra: Amodal mask (1)
+- Đầu ra: Amodal mask (1 kênh)
 - Ứng dụng: Hoàn thiện hình dạng của vật thể bị che khuất bằng các vật thể khác
 ===================================================================================
 """
@@ -97,23 +97,19 @@ class AmodalSwinUNet(nn.Module):
     
     Kiến trúc:
     1. ENCODER: Swin Transformer (đã huấn luyện trước trên ImageNet)
-       - Xử lý 5 kênh: RGB (3) + Visible mask (1) + Edge mask (1)
+       - Xử lý 5 kênh đầu vào: RGB (3) + Visible mask (1) + Edge mask (1)
        - Trích xuất đặc trưng phân cấp
     
-    2. EMBEDDING NHÃN: Chuyển đổi class ID thành vector nhúng
-       - Hỗ trợ 91 loại vật thể COCO
-       - Nhúng vào bottleneck của U-Net
-    3. DECODER: Khôi phục độ phân giải gốc
+    2. DECODER: Khôi phục độ phân giải gốc
        - Sử dụng skip connections từ encoder
        - Gồm 3 lớp up-sampling
     
     Args:
         model_name: Tên mô hình encoder từ timm (mặc định: swin_tiny_patch4_window7_224)
         pretrained: Có dùng trọng số pre-trained không (mặc định: True)
-        num_classes: Số loại vật thể (mặc định: 91 cho COCO)
     """
     
-    def __init__(self, model_name="swin_tiny_patch4_window7_224", pretrained=True, num_classes=91):
+    def __init__(self, model_name="swin_tiny_patch4_window7_224", pretrained=True):
         super().__init__()
 
         # ─────────────────────────────────────────────────────────────────────
@@ -136,16 +132,9 @@ class AmodalSwinUNet(nn.Module):
             self.encoder.patch_embed.proj.weight[:, 3:, :, :] = 0
 
         # ─────────────────────────────────────────────────────────────────────
-        # PHẦN 2: EMBEDDING NHÃN (Class ID → Vector nhúng)
+        # PHẦN 2: DECODER U-NET (Khôi phục độ phân giải)
         # ─────────────────────────────────────────────────────────────────────
-        # Chuyển đổi ID loại vật thể thành vector nhúng
-        # Ví dụ: class_id=3 (xe hơi) → vector 768 chiều
-        self.category_emb = nn.Embedding(num_classes, 768)
-
-        # ─────────────────────────────────────────────────────────────────────
-        # PHẦN 4: DECODER U-NET (Khôi phục độ phân giải)
-        # ─────────────────────────────────────────────────────────────────────
-        # 3 lớp up-sampling + skip connections
+        # 3 lớp up-sampling kết hợp skip connections
         self.up1 = UpBlock(768, 384)    # Từ 768 → 384 kênh
         self.up2 = UpBlock(384, 192)    # Từ 384 → 192 kênh
         self.up3 = UpBlock(192, 96)     # Từ 192 → 96 kênh
@@ -162,22 +151,20 @@ class AmodalSwinUNet(nn.Module):
         self.final_conv = nn.Conv2d(64, 1, kernel_size=1)
 
 
-    def forward(self, x, class_ids):
+    def forward(self, x):
         """
-        Dự đoán mask amodal từ ảnh 5 kênh và ID loại vật thể.
+        Dự đoán mask amodal từ ảnh 5 kênh.
         
         Quy trình:
         1. Encoder: Trích xuất đặc trưng phân cấp
-        2. Nhúng nhãn vào bottleneck
-        3. Decoder: Khôi phục độ phân giải
-        4. Final Conv: Tạo ra dự đoán cuối cùng
+        2. Decoder: Khôi phục độ phân giải
+        3. Final Conv: Tạo ra dự đoán cuối cùng
         
         Args:
             x: Ảnh 5 kênh [Batch, 5, 224, 224]
                - Kênh 0-2: RGB
                - Kênh 3: Visible mask
                - Kênh 4: Edge mask
-            class_ids: ID loại vật thể [Batch]
         
         Returns:
             Logit mask amodal [Batch, 1, 224, 224]
@@ -198,17 +185,7 @@ class AmodalSwinUNet(nn.Module):
         x_bottleneck = formatted_skips[3]
 
         # ──────────────────────────────────────────────────────
-        # PHASE 2: NHÚNG NHÃN VÀO BOTTLENECK
-        # ──────────────────────────────────────────────────────
-        # Chuyển đổi class ID → vector nhúng
-        c_emb = self.category_emb(class_ids)  # [Batch, 768]
-        # Kéo giãn để match với hình dạng bottleneck
-        c_emb = c_emb.unsqueeze(-1).unsqueeze(-1)  # [Batch, 768, 1, 1]
-        # Cộng nhúng nhãn vào bottleneck để "gợi ý" cho mô hình
-        x_bottleneck = x_bottleneck + c_emb  # Broadcasting cộng
-
-        # ──────────────────────────────────────────────────────
-        # PHASE 3: DECODER - Khôi phục độ phân giải
+        # PHASE 2: DECODER - Khôi phục độ phân giải
         # ──────────────────────────────────────────────────────
         # Lớp 1: 768 → 384 kênh (kích thước ×2)
         x_decoder = self.up1(x_bottleneck, formatted_skips[2])  
@@ -221,7 +198,7 @@ class AmodalSwinUNet(nn.Module):
         x_upsampled = self.up_final(x_decoder)
 
         # ──────────────────────────────────────────────────────
-        # PHASE 4: DỰ ĐOÁN ĐẦU RA CUỐI CÙNG
+        # PHASE 3: DỰ ĐOÁN ĐẦU RA CUỐI CÙNG
         # ──────────────────────────────────────────────────────
         # Tạo ra dự đoán mask cuối cùng (logit chưa qua sigmoid)
         logits = self.final_conv(x_upsampled) # Truyền thẳng x_upsampled vào lớp cuối
@@ -238,15 +215,12 @@ if __name__ == "__main__":
     
     # Tạo input giả định: 2 bức ảnh, 5 kênh, kích thước 224×224
     dummy_input = torch.randn(2, 5, 224, 224)
-    # Tạo class IDs giả định: ảnh 1 là loại 3, ảnh 2 là loại 1
-    dummy_class = torch.tensor([3, 1]) 
     
     # Chạy qua mô hình
     with torch.no_grad():
-        output = model(dummy_input, dummy_class)
+        output = model(dummy_input)
         
     # In kết quả
-    print(f"✅ Kiến trúc Swin-UNet 5 kênh + Nhúng nhãn hoạt động OK!")
+    print(f"✅ Kiến trúc Swin-UNet 5 kênh (không nhúng nhãn) hoạt động OK!")
     print(f"Đầu vào (Ảnh):    {dummy_input.shape}")
-    print(f"Đầu vào (Nhãn):   {dummy_class.shape}")
     print(f"Đầu ra (Mask):    {output.shape} (Phải là [2, 1, 224, 224])")
