@@ -5,7 +5,7 @@ HUẤN LUYỆN AMODAL SWIN-UNET
 Script huấn luyện mô hình Amodal Shape Prediction trên COCO-Amodal dataset.
 
 Tính năng:
-- Sử dụng loss function đặc biệt cho occlusion (5x weight cho vùng bị che)
+- Sử dụng loss function BCEWithLogitsLoss thông thường
 - Gradient accumulation để tăng batch size hiệu quả
 - Learning rate scheduling (Cosine annealing)
 - Progress bar theo dõi training
@@ -26,57 +26,6 @@ import albumentations as A
 # Import các module từ project
 from dataset import AmodalDataset
 from model import AmodalSwinUNet
-
-
-class OcclusionAwareLoss(nn.Module):
-    """
-    Loss function thiết kế riêng cho Amodal Prediction.
-    
-    Ý tưởng:
-    - Phần bị che khuất (occlusion region) khó dự đoán hơn → cần weight cao hơn
-    - Kết hợp weighted BCE loss + Dice loss
-    - Weight multiplier cho occlusion: 5x (có thể điều chỉnh)
-    
-    Args:
-        occlusion_weight: Hệ số nhân trọng lượng cho vùng bị che khuất (mặc định: 5.0)
-    """
-    def __init__(self, occlusion_weight=5.0):
-        super().__init__()
-        # BCE loss tính từng pixel riêng biệt (reduction='none')
-        self.bce = nn.BCEWithLogitsLoss(reduction="none")
-        self.occlusion_weight = occlusion_weight
-
-    def forward(self, pred, target, occluded_region):
-        """
-        Tính loss với tập trọng số khác nhau cho vùng bị che và không bị che.
-        
-        Args:
-            pred: Dự đoán logit [B, 1, H, W]
-            target: Amodal mask nhãn [B, 1, H, W]
-            occluded_region: Vùng bị che khuất [B, 1, H, W] (0 hoặc 1)
-        
-        Returns:
-            Tổng loss (scalar)
-        """
-        # Tính BCE loss cho từng pixel
-        bce_loss = self.bce(pred, target)
-        
-        # Tạo ma trận trọng số: mặc định 1, ở vùng occlusion là 5x
-        weight_matrix = torch.ones_like(target) 
-        weight_matrix[occluded_region > 0.5] = self.occlusion_weight
-        
-        # Áp dụng trọng số vào BCE loss
-        weighted_bce = (bce_loss * weight_matrix).mean()
-
-        # Tính Dice loss để tăng cân bằng
-        pred_prob = torch.sigmoid(pred)
-        intersection = (pred_prob * target).sum(dim=(2, 3))
-        union = pred_prob.sum(dim=(2, 3)) + target.sum(dim=(2, 3))
-        dice_loss = 1.0 - (2.0 * intersection + 1e-6) / (union + 1e-6)
-
-        # Kết hợp hai loss
-        return weighted_bce + dice_loss.mean()
-
 
 def train():
     """
@@ -138,7 +87,7 @@ def train():
     # ─────────────────────────────────────────────────────────────────
     # LOSS FUNCTION & OPTIMIZER
     # ─────────────────────────────────────────────────────────────────
-    criterion = OcclusionAwareLoss(occlusion_weight=5.0)
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     
     # Learning rate scheduler: giảm LR theo Cosine annealing
@@ -169,11 +118,10 @@ def train():
             # Di chuyển dữ liệu lên GPU
             inputs = inputs.to(DEVICE)
             targets = targets.unsqueeze(1).float().to(DEVICE)  # Thêm chiều kênh
-            occluded = occluded.unsqueeze(1).float().to(DEVICE)
 
             # Forward pass: tính dự đoán
             outputs = model(inputs)
-            loss = criterion(outputs, targets, occluded)
+            loss = criterion(outputs, targets)
             
             # Gradient accumulation: chia loss cho số bước tích lũy
             loss = loss / ACCUMULATION_STEPS 
