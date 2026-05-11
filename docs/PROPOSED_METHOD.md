@@ -38,11 +38,11 @@ Phương pháp đề xuất được thiết kế theo kiến trúc giai đoạn
 ┌─────────────────────────────────────────────────────────────────┐
 │ Stage 2: Suy luận Amodal (Amodal Inference)                    │
 │                                                                 │
-│ Input: RGB + Visible Mask + Edge Mask + Category ID            │
+│ Input: RGB + Visible Mask                                      │
 │ Output: Amodal Mask (hình dạng toàn bộ)                        │
 │                                                                 │
 │ Model: Swin Transformer Encoder + U-Net Decoder                │
-│        + Spatial Attention Module (Học từ dữ liệu COCO-Amodal)│
+│        (Học từ dữ liệu COCO-Amodal)                            │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -104,38 +104,18 @@ visible_mask = sam_model.predict(image, point_prompt)
 
 ### 3.1 Xử lý dữ liệu
 
-#### 3.1.1 Chuẩn bị Input 5-Kênh
+#### 3.1.1 Chuẩn bị Input 4-Kênh
 
-Từ ảnh gốc, chúng tôi xây dựng một tensor 5-kênh `[B, 5, 224, 224]`:
+Từ ảnh gốc, chúng tôi xây dựng một tensor 4-kênh `[B, 4, 224, 224]`:
 
 | Kênh | Tên | Mô tả | Nguồn dữ liệu |
 |------|-----|-------|---------------|
 | 1-3 | RGB Image | Ảnh màu chuẩn hóa | Ảnh gốc từ dataset |
 | 4 | Visible Mask | Phần vật thể nhìn thấy | SAM 2.1 hoặc annotation |
-| 5 | Edge Mask | Ranh giới của vùng che | Morphological operations |
 
-**Quá trình tính Edge Mask:**
-
-```python
-# Visible mask đã có từ Stage 1
-visible_mask = sam_output  # Binary mask [H, W]
-
-# Amodal mask từ annotation
-amodal_mask = load_from_json()  # Binary mask [H, W]
-
-# Tính vùng bị che khuất (occlusion)
-occlusion_region = amodal_mask - visible_mask  # [0, 1]
-
-# Edge mask: ranh giới của vùng bị che
-kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-occlusion_dilated = cv2.dilate(occlusion_region, kernel, iterations=2)
-edge_mask = occlusion_dilated - occlusion_region  # Ranh giới
-```
-
-**Lợi ích của 5-kênh:**
+**Lợi ích của 4-kênh:**
 1. **RGB:** Thông tin đặc trưng chính của cảnh
 2. **Visible Mask:** Gợi ý vùng vật thể đã biết
-3. **Edge Mask:** Hướng dẫn mô hình về ranh giới dự đoán
 
 #### 3.1.2 Thống kê Dataset
 

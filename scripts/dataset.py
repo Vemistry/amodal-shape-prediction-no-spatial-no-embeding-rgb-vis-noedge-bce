@@ -88,12 +88,11 @@ class AmodalDataset(Dataset):
         4. Vẽ visible mask (phần nhìn thấy sau khi xóa phần bị che)
         5. Tính occlusion region (phần bị che)
         6. Data augmentation (nếu có)
-        7. Tính edge mask (viền gợi ý)
-        8. Kết hợp thành 5 kênh input tensor
+        7. Kết hợp thành 4 kênh input tensor
         
         Returns:
             Tuple gồm 4 thành phần:
-            - input_tensor: Ảnh 5 kênh [5, H, W]
+            - input_tensor: Ảnh 4 kênh [4, H, W]
             - amodal_tensor: Amodal mask [H, W]
             - occluded_region: Vùng bị che [H, W]
             - cat_id: Class ID loại vật thể
@@ -184,31 +183,14 @@ class AmodalDataset(Dataset):
         occluded_region = torch.clamp(amodal_tensor - visible_tensor, min=0.0)
 
         # ──────────────────────────────────────────────────────────────────
-        # BƯỚC 7: VẼ EDGE MASK (Viền gợi ý)
-        # ──────────────────────────────────────────────────────────────────
-        # Edge mask = biên của visible mask (dilatation - erosion)
-        # Điều này giúp model biết ranh giới của vật thể nhìn thấy
-        visible_uint8 = (visible_mask * 255).astype(np.uint8) 
-        # Kernel 5×5 để tìm cạnh
-        kernel = np.ones((5, 5), np.uint8)
-        # Dilation: thêm white pixels xung quanh ranh giới
-        dilation = cv2.dilate(visible_uint8, kernel, iterations=1)
-        # Erosion: bớt white pixels từ ranh giới
-        erosion = cv2.erode(visible_uint8, kernel, iterations=1)
-        # Edge = sự chênh lệch (ranh giới giữa dilate và erode)
-        edge_mask = torch.tensor((dilation - erosion) / 255.0, dtype=torch.float32)
-
-        # ──────────────────────────────────────────────────────────────────
-        # BƯỚC 8: KẾT HỢP THÀNH 5 KÊNH INPUT
+        # BƯỚC 7: KẾT HỢP THÀNH 4 KÊNH INPUT
         # ──────────────────────────────────────────────────────────────────
         # Kênh 0-2: RGB ảnh gốc
         # Kênh 3: Visible mask (chỉ phần nhìn thấy)
-        # Kênh 4: Edge mask (viền gợi ý)
         input_tensor = torch.cat([
             image_tensor,                          # Kênh 0-2: RGB [3, H, W]
             visible_tensor.unsqueeze(0),           # Kênh 3: Visible [1, H, W]
-            edge_mask.unsqueeze(0)                 # Kênh 4: Edge [1, H, W]
-        ], dim=0)  # Nối theo chiều kênh → [5, H, W]
+        ], dim=0)  # Nối theo chiều kênh → [4, H, W]
         
         # Lấy class ID loại vật thể
         cat_id = ann.get('category_id', 0)

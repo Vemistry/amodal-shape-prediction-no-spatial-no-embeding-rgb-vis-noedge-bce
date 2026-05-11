@@ -15,7 +15,7 @@ Metrics used:
 - Tổng hợp kết quả (mIoU, Dice, Precision, Recall, Invisible mIoU)
 - Per-sample metrics (lưu để phân tích failure cases)
 
-Chạy:   python scripts/evaluate.py --img-dir data/val2014 --ann-file data/annotations/COCO_amodal_val2014.json --checkpoint checkpoints/swin_amodal_epoch_30.pth
+Chạy:   python scripts/evaluate.py --img-dir data/val2014 --ann-file data/annotations/COCO_amodal_val2014.json --checkpoint checkpoints/swin_amodal_epoch_1.pth
 ===================================================================================
 """
 
@@ -121,7 +121,7 @@ def evaluate(args):
 
     print("📊 Tính toán metrics từng pixel... Xin chờ!")
     with torch.no_grad():
-        for inputs, targets, occluded_region, _ in tqdm(
+        for inputs, targets, _, _ in tqdm(
             loader, desc="Evaluating"
         ):
             inputs = inputs.to(device)
@@ -207,7 +207,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Đánh giá mô hình Amodal Segmentation")
     parser.add_argument("--img-dir", type=str, default="../data/val2014", help="Thư mục chứa ảnh validation")
     parser.add_argument("--ann-file", type=str, default="../data/annotations/COCO_amodal_val2014.json", help="File annotation COCO-Amodal")
-    parser.add_argument("--checkpoint", type=str, default="../checkpoints/swin_amodal_epoch_30.pth", help="Đường dẫn checkpoint mô hình")
+    parser.add_argument("--checkpoint", type=str, default="../checkpoints/swin_amodal_epoch_1.pth", help="Đường dẫn checkpoint mô hình")
     parser.add_argument("--batch-size", type=int, default=16, help="Kích thước batch")
     parser.add_argument("--num-workers", type=int, default=4, help="Số worker DataLoader")
     parser.add_argument("--resize", type=int, default=224, help="Kích thước resize input")

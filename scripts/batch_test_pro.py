@@ -40,7 +40,7 @@ def batch_test_pro():
     # BƯỚC 2: NẠP MÔ HÌNH
     # ─────────────────────────────────────────────────────────────
     # Mô hình hỗ trợ 91 class COCO
-    model = AmodalSwinUNet(num_classes=91).to(DEVICE)
+    model = AmodalSwinUNet().to(DEVICE)
     
     TEST_EPOCH = 30
     weight_path = f'../checkpoints/swin_amodal_epoch_{TEST_EPOCH}.pth'
@@ -69,13 +69,12 @@ def batch_test_pro():
     # ─────────────────────────────────────────────────────────────
     # BƯỚC 4: LẤY BATCH NGẪU NHIÊN & CHẠY
     # ─────────────────────────────────────────────────────────────
-    inputs, target_masks, _, class_ids = next(iter(loader))
+    inputs, target_masks, _, _ = next(iter(loader))
     inputs = inputs.to(DEVICE)
-    class_ids = class_ids.to(DEVICE)
     print(f"🔄 Xử lý {inputs.shape[0]} ảnh cùng lúc...")
 
     with torch.no_grad():
-        output_logits = model(inputs, class_ids)
+        output_logits = model(inputs)
         pred_masks = torch.sigmoid(output_logits)
         pred_masks = (pred_masks > 0.5).float()
 

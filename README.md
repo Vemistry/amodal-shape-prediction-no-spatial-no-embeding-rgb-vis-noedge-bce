@@ -22,12 +22,11 @@ Hệ thống được thiết kế theo dạng Pipeline 2 giai đoạn (2-Stage)
 - **Tính toán hình học:** Tự động đối chiếu Visible Mask và Amodal Mask để tính toán diện tích che khuất và hiển thị trực quan phần bị lấp.
 
 ## 🧠 2. Kiến trúc Mô hình (Amodal Swin-UNet)
-Mô hình đã được nâng cấp từ phiên bản 4-channel cũ lên cấu trúc 5-channel để tăng cường *Inductive Bias* cho mạng nơ-ron:
+Mô hình sử dụng cấu trúc 4-channel để xử lý thông tin:
 
 - **Encoder:** Sử dụng backbone `timm` (`swin_tiny_patch4_window7_224`, pretrained). Patch Embedding được can thiệp sửa đổi để nhận **Input Tensor [B, 5, 224, 224]** bao gồm:
   1. `Kênh 1-3:` Ảnh RGB (đã chuẩn hóa).
   2. `Kênh 4:` Visible Mask (phần vật thể không bị che khuất).
-  3. `Kênh 5:` Edge Mask (ranh giới bị lấp, trích xuất bằng thuật toán hình thái học cv2.dilate/erode).
 - **Decoder:** Khối 3 cấp `UpBlock` kết hợp `nn.Upsample(scale_factor=4)`.
 - **Head:** Lớp `Conv2d(64, 1, 1)` trả về logits. Kích thước output cuối cùng: `[B, 1, 224, 224]`.
 

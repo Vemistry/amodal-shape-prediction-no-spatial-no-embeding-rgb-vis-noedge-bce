@@ -97,7 +97,7 @@ class AmodalSwinUNet(nn.Module):
     
     Kiến trúc:
     1. ENCODER: Swin Transformer (đã huấn luyện trước trên ImageNet)
-       - Xử lý 5 kênh đầu vào: RGB (3) + Visible mask (1) + Edge mask (1)
+       - Xử lý 4 kênh đầu vào: RGB (3) + Visible mask (1)
        - Trích xuất đặc trưng phân cấp
     
     2. DECODER: Khôi phục độ phân giải gốc
@@ -118,18 +118,18 @@ class AmodalSwinUNet(nn.Module):
         # Tạo mô hình Swin Transformer encoder đã huấn luyện trước
         self.encoder = timm.create_model(model_name, pretrained=pretrained, features_only=True)
         
-        # Cải thiệp lớp patch embedding để xử lý 5 kênh (thay vì 3)
+        # Cải thiệp lớp patch embedding để xử lý 4 kênh (thay vì 3)
         # Lưu trọng số gốc cho 3 kênh RGB
         pretrained_patch_embed = self.encoder.patch_embed.proj.weight
-        # Tạo lớp tích chập mới cho 5 kênh
-        self.encoder.patch_embed.proj = nn.Conv2d(5, 96, kernel_size=4, stride=4) 
+        # Tạo lớp tích chập mới cho 4 kênh
+        self.encoder.patch_embed.proj = nn.Conv2d(4, 96, kernel_size=4, stride=4) 
         
         # Sao chép trọng số pre-trained cho 3 kênh RGB
         with torch.no_grad():
             # Các trọng số cho R, G, B từ mô hình gốc
             self.encoder.patch_embed.proj.weight[:, :3, :, :] = pretrained_patch_embed
-            # Khởi tạo ngẫu nhiên cho 2 kênh bổ sung (Visible + Edge)
-            self.encoder.patch_embed.proj.weight[:, 3:, :, :] = 0
+            # Khởi tạo ngẫu nhiên cho kênh bổ sung (Visible)
+            self.encoder.patch_embed.proj.weight[:, 3, :, :] = 0
 
         # ─────────────────────────────────────────────────────────────────────
         # PHẦN 2: DECODER U-NET (Khôi phục độ phân giải)
@@ -161,10 +161,9 @@ class AmodalSwinUNet(nn.Module):
         3. Final Conv: Tạo ra dự đoán cuối cùng
         
         Args:
-            x: Ảnh 5 kênh [Batch, 5, 224, 224]
+            x: Ảnh 4 kênh [Batch, 4, 224, 224]
                - Kênh 0-2: RGB
                - Kênh 3: Visible mask
-               - Kênh 4: Edge mask
         
         Returns:
             Logit mask amodal [Batch, 1, 224, 224]
@@ -213,14 +212,14 @@ if __name__ == "__main__":
     # Tạo mô hình
     model = AmodalSwinUNet()
     
-    # Tạo input giả định: 2 bức ảnh, 5 kênh, kích thước 224×224
-    dummy_input = torch.randn(2, 5, 224, 224)
+    # Tạo input giả định: 2 bức ảnh, 4 kênh, kích thước 224×224
+    dummy_input = torch.randn(2, 4, 224, 224)
     
     # Chạy qua mô hình
     with torch.no_grad():
         output = model(dummy_input)
         
     # In kết quả
-    print(f"✅ Kiến trúc Swin-UNet 5 kênh (không nhúng nhãn) hoạt động OK!")
+    print(f"✅ Kiến trúc Swin-UNet 4 kênh (không nhúng nhãn) hoạt động OK!")
     print(f"Đầu vào (Ảnh):    {dummy_input.shape}")
     print(f"Đầu ra (Mask):    {output.shape} (Phải là [2, 1, 224, 224])")

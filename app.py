@@ -278,29 +278,14 @@ def end_to_end_predict(orig_image, pts, category_id):
         visible_mask = (mask_resized > 128).astype(np.float32)
 
         # ─────────────────────────────────────────────────
-        # Tạo EDGE MASK (viền gợi ý)
-        # ─────────────────────────────────────────────────
-        visible_uint8 = (visible_mask * 255).astype(np.uint8)
-        kernel = np.ones((5, 5), np.uint8)
-        # Edge = dilate - erode (viền ranh giới)
-        edge_mask = (
-            cv2.dilate(visible_uint8, kernel, iterations=1)
-            - cv2.erode(visible_uint8, kernel, iterations=1)
-        ) / 255.0
-
-        # ─────────────────────────────────────────────────
         # Chuẩn hóa ảnh RGB
         # ─────────────────────────────────────────────────
         img_norm = img_resized.astype(np.float32) / 255.0
         img_tensor = torch.from_numpy(img_norm.transpose(2, 0, 1)).float()
 
-        # Tạo 5-kênh input
+        # Tạo 4-kênh input
         vis_tensor = torch.from_numpy(visible_mask).float().unsqueeze(0)
-        edge_tensor = torch.from_numpy(edge_mask).float().unsqueeze(0)
-
-        input_tensor = torch.cat(
-            [img_tensor, vis_tensor, edge_tensor], dim=0
-        ).unsqueeze(0).to(DEVICE)  # [1, 5, 224, 224]
+        input_tensor = torch.cat([img_tensor, vis_tensor], dim=0).unsqueeze(0).to(DEVICE)  # [1, 4, 224, 224]
 
         # Chuyển class ID thành tensor
         class_id_tensor = torch.tensor([real_cat_id]).long().to(DEVICE)
