@@ -84,7 +84,6 @@ class UpBlock(nn.Module):
         """
         # Phóng tỉ lệ lên 2 lần
         x_up = self.up(x_decoder)
-        x_up = self.up(x_up)
         # Nối chiều kênh: [skip, upsampled]
         x_concat = torch.cat([x_skip, x_up], dim=1)
         # Xử lý tích chập trên kết hợp
