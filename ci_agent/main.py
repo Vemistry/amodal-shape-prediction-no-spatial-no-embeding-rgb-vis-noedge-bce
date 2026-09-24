@@ -83,12 +83,28 @@ def main() -> int:
 
     logger.info("Tầng 1 PASS! Bắt đầu Tầng 2: Semantic AI Review...")
 
+    if not config.gemini_api_key:
+        logger.error(
+            "\n" + "=" * 70 + "\n"
+            "LỖI: GEMINI_API_KEY chưa được thiết lập hoặc đang bị rỗng!\n\n"
+            "Các nguyên nhân phổ biến trên GitHub Actions:\n"
+            "1. Nhầm tab: Bạn đã tạo trong mục 'Variables' thay vì 'Secrets'.\n"
+            "   -> Kiểm tra: Settings > Secrets and variables > Actions > tab 'Secrets'.\n"
+            "2. Nhầm phạm vi: Bạn đã tạo trong 'Environment secrets' thay vì 'Repository secrets'.\n"
+            "   -> Cần tạo ở mục 'Repository secrets' (phía dưới của trang).\n"
+            "3. Sai tên chính xác: Tên Secret phải là chính xác 'GEMINI_API_KEY'.\n"
+            "4. PR từ Fork: Nếu PR tạo từ tài khoản fork, GitHub sẽ ẩn secret vì bảo mật.\n"
+            + "=" * 70 + "\n"
+        )
+        return 1
+
     # 3. Tầng 2: Semantic Review bằng Gemini LLM
     reviewer = GeminiReviewer(
         api_key=config.gemini_api_key,
         model=config.gemini_model,
         guidelines_path=config.guidelines_path,
     )
+
 
     review_res = reviewer.review_diffs(file_diffs)
     logger.info(f"Hoàn thành review: {review_res.status} ({len(review_res.comments)} nhận xét).")
