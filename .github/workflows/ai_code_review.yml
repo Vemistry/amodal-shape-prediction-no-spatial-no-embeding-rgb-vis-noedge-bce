@@ -39,7 +39,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_REF: origin/${{ github.base_ref }}
-          GEMINI_MODEL: gemini-1.5-flash
+          GEMINI_MODEL: gemini-3.6-flash
         run: |
           python -m ci_agent.main \
             --pr "${{ github.event.pull_request.number }}" \
