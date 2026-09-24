@@ -34,7 +34,7 @@ jobs:
 
       - name: Run Review Agent
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || vars.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -44,4 +44,6 @@ jobs:
           python -m ci_agent.main \
             --pr "${{ github.event.pull_request.number }}" \
             --repo "${{ github.repository }}" \
-            --base "origin/${{ github.base_ref }}"
+            --base "origin/${{ github.base_ref }}" \
+            --api-key "${{ secrets.GEMINI_API_KEY || vars.GEMINI_API_KEY }}"
+
