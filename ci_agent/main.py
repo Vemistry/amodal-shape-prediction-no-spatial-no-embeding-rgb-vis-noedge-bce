@@ -86,7 +86,7 @@ def main() -> int:
     if not config.gemini_api_key:
         logger.error(
             "\n" + "=" * 70 + "\n"
-            "❌ LỖI: GEMINI_API_KEY chưa được thiết lập hoặc đang bị rỗng!\n\n"
+            "LỖI: GEMINI_API_KEY chưa được thiết lập hoặc đang bị rỗng!\n\n"
             "Các nguyên nhân phổ biến trên GitHub Actions:\n"
             "1. Nhầm tab: Bạn đã tạo trong mục 'Variables' thay vì 'Secrets'.\n"
             "   -> Kiểm tra: Settings > Secrets and variables > Actions > tab 'Secrets'.\n"
