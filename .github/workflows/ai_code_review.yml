@@ -25,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install Reviewer Dependencies
         run: |
@@ -39,11 +39,10 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_REF: origin/${{ github.base_ref }}
-          GEMINI_MODEL: gemini-1.5-flash
+          GEMINI_MODEL: gemini-3.6-flash
         run: |
           python -m ci_agent.main \
             --pr "${{ github.event.pull_request.number }}" \
             --repo "${{ github.repository }}" \
             --base "origin/${{ github.base_ref }}" \
             --api-key "${{ secrets.GEMINI_API_KEY || vars.GEMINI_API_KEY }}"
-
