@@ -1,0 +1,47 @@
+name: AI Code Review Agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-code-review:
+    name: Run In-House AI Code Review
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Quan trọng: lấy đầy đủ commit history để tính git diff chuẩn xác
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Reviewer Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests ruff
+
+      - name: Run Review Agent
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: origin/${{ github.base_ref }}
+          GEMINI_MODEL: gemini-1.5-flash
+        run: |
+          python -m ci_agent.main \
+            --pr "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --base "origin/${{ github.base_ref }}"

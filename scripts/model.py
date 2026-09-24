@@ -65,7 +65,7 @@ class UpBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         # Tích chập chuyển vị (Deconvolution): giảm kênh 1/2, tăng kích thước 2x
-        self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+        self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=3)
         # Xử lý sau khi nối với skip connection
         self.conv = DoubleConv(in_channels, out_channels)
 
