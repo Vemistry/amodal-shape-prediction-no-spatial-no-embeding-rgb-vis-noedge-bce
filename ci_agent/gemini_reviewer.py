@@ -77,8 +77,8 @@ class GeminiReviewer:
         # Prepare diff context for each file
         diff_payload = []
         for fd in file_diffs:
-            # Skip pure deletes or non-code files if desired
-            if fd.is_deleted or not fd.valid_new_lines:
+            # Skip pure deletes of files
+            if fd.is_deleted:
                 continue
 
             diff_payload.append({
@@ -88,7 +88,8 @@ class GeminiReviewer:
             })
 
         if not diff_payload:
-            return ReviewResult(status="APPROVED", summary="Các file thay đổi là xóa file hoặc không có dòng thêm mới.", comments=[])
+            return ReviewResult(status="APPROVED", summary="Tất cả các thay đổi là xóa file.", comments=[])
+
 
         user_content = (
             "Hãy phân tích các file diff sau đây và trả về danh sách nhận xét review dưới dạng JSON array:\n\n"

@@ -101,17 +101,18 @@ class GitHubPoster:
         inline_comments = []
         if review_res and review_res.comments:
             for c in review_res.comments:
-                inline_comments.append({
-                    "path": c.file_path,
-                    "line": c.line_number,
-                    "body": c.to_markdown(),
-                })
+                if c.line_number > 0:
+                    inline_comments.append({
+                        "path": c.file_path,
+                        "line": c.line_number,
+                        "body": c.to_markdown(),
+                    })
 
+
+        # GitHub Actions (GITHUB_TOKEN) is not allowed to submit "APPROVE" reviews by default.
+        # Standard industry bots (CodeRabbit, etc.) always submit reviews with event="COMMENT"
+        # and display the approval status clearly in the markdown body.
         event = "COMMENT"
-        if not linter_res.passed or (review_res and review_res.status == "CHANGES_REQUESTED"):
-            event = "REQUEST_CHANGES"
-        elif review_res and review_res.status == "APPROVED":
-            event = "APPROVE"
 
         reviews_url = f"https://api.github.com/repos/{self.repo}/pulls/{self.pr_number}/reviews"
         payload = {
@@ -131,7 +132,16 @@ class GitHubPoster:
         fallback_payload = {
             "commit_id": head_sha,
             "body": overall_report,
-            "event": event,
+            "event": "COMMENT",
         }
         fb_resp = requests.post(reviews_url, headers=headers, json=fallback_payload, timeout=30)
-        return fb_resp.status_code in (200, 201)
+        if fb_resp.status_code in (200, 201):
+            logger.info("Đã gửi fallback review summary thành công!")
+            return True
+
+        # Final fallback: post as a normal issue comment if pull request reviews are restricted
+        logger.warning("Post review thất bại (%s), thử gửi dưới dạng Issue Comment thông thường...", fb_resp.text)
+        issue_comments_url = f"https://api.github.com/repos/{self.repo}/issues/{self.pr_number}/comments"
+        issue_resp = requests.post(issue_comments_url, headers=headers, json={"body": overall_report}, timeout=30)
+        return issue_resp.status_code in (200, 201)
+
