@@ -4,6 +4,7 @@ and returns validated structured review comments.
 """
 import json
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 import requests
@@ -40,6 +41,8 @@ class ReviewResult:
     status: str  # "APPROVED", "CHANGES_REQUESTED", "COMMENT"
     summary: str
     comments: list[ReviewComment]
+    is_error: bool = False
+    error_message: str = ""
 
 
 class GeminiReviewer:
@@ -77,7 +80,6 @@ class GeminiReviewer:
         # Prepare diff context for each file
         diff_payload = []
         for fd in file_diffs:
-            # Skip pure deletes of files
             if fd.is_deleted:
                 continue
 
@@ -89,7 +91,6 @@ class GeminiReviewer:
 
         if not diff_payload:
             return ReviewResult(status="APPROVED", summary="Tất cả các thay đổi là xóa file.", comments=[])
-
 
         user_content = (
             "Hãy phân tích các file diff sau đây và trả về danh sách nhận xét review dưới dạng JSON array:\n\n"
@@ -111,7 +112,6 @@ class GeminiReviewer:
             "}"
         )
 
-        url = f"{self.GEMINI_API_URL.format(model=self.model)}?key={self.api_key}"
         headers = {"Content-Type": "application/json"}
         body = {
             "contents": [{"role": "user", "parts": [{"text": user_content}]}],
@@ -122,59 +122,90 @@ class GeminiReviewer:
             },
         }
 
-        try:
-            resp = requests.post(url, headers=headers, json=body, timeout=60)
-            if resp.status_code != 200:
-                raise RuntimeError(f"Gemini API Error [{resp.status_code}]: {resp.text}")
+        # Model fallback chain: try primary model, then fallback to gemini-3.5-flash-lite (500 RPD quota)
+        models_to_try = [self.model]
+        fallback = "gemini-3.5-flash-lite" if self.model != "gemini-3.5-flash-lite" else "gemini-3.6-flash"
+        if fallback not in models_to_try:
+            models_to_try.append(fallback)
 
-            result_json = resp.json()
-            candidates = result_json.get("candidates", [])
-            if not candidates:
-                return ReviewResult(status="COMMENT", summary="LLM không trả về kết quả đánh giá.", comments=[])
+        last_error_msg = ""
 
-            raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
-            parsed = json.loads(raw_text)
+        for current_model in models_to_try:
+            url = f"{self.GEMINI_API_URL.format(model=current_model)}?key={self.api_key}"
+            # Exponential backoff retry loop (up to 3 attempts per model)
+            for attempt in range(1, 4):
+                try:
+                    logger.info(f"Đang gửi request tới Gemini ({current_model}) - Lần thử {attempt}/3...")
+                    resp = requests.post(url, headers=headers, json=body, timeout=60)
 
-            # Build line validator lookup: {file_path: set(valid_lines)}
-            valid_lines_map = {fd.file_path: fd.valid_new_lines for fd in file_diffs}
+                    # Handle 503 (High Demand) or 429 (Rate Limit) with backoff
+                    if resp.status_code in (429, 500, 502, 503, 504):
+                        last_error_msg = f"Gemini API [{resp.status_code}]: {resp.text}"
+                        wait_seconds = attempt * 3
+                        logger.warning(f"Gemini {current_model} trả về mã {resp.status_code} (nghẽn tải tạm thời). Đợi {wait_seconds}s rồi thử lại...")
+                        time.sleep(wait_seconds)
+                        continue
 
-            validated_comments: list[ReviewComment] = []
-            for item in parsed.get("comments", []):
-                fp = item.get("file_path", "")
-                line = int(item.get("line_number", 0))
-                severity = item.get("severity", "INFO").upper()
+                    if resp.status_code != 200:
+                        raise RuntimeError(f"Gemini API Error [{resp.status_code}]: {resp.text}")
 
-                # Validate line number
-                if fp in valid_lines_map and valid_lines_map[fp]:
-                    valid_set = valid_lines_map[fp]
-                    if line not in valid_set:
-                        # Find closest line in valid_set
-                        line = min(valid_set, key=lambda x: abs(x - line))
+                    result_json = resp.json()
+                    candidates = result_json.get("candidates", [])
+                    if not candidates:
+                        return ReviewResult(status="COMMENT", summary="LLM không trả về kết quả đánh giá.", comments=[])
 
-                validated_comments.append(
-                    ReviewComment(
-                        file_path=fp,
-                        line_number=line,
-                        severity=severity,
-                        rule_id=item.get("rule_id", "GENERAL"),
-                        comment=item.get("comment", ""),
-                        suggestion=item.get("suggestion", ""),
-                    )
-                )
+                    raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
+                    parsed = json.loads(raw_text)
 
-            # Determine final status
-            has_critical = any(c.severity == "CRITICAL" for c in validated_comments)
-            has_warning = any(c.severity == "WARNING" for c in validated_comments)
+                    # Build line validator lookup: {file_path: set(valid_lines)}
+                    valid_lines_map = {fd.file_path: fd.valid_new_lines for fd in file_diffs}
 
-            status = "CHANGES_REQUESTED" if has_critical else ("COMMENT" if has_warning else "APPROVED")
-            summary = parsed.get("summary", "Đã hoàn thành đánh giá mã nguồn.")
+                    validated_comments: list[ReviewComment] = []
+                    for item in parsed.get("comments", []):
+                        fp = item.get("file_path", "")
+                        line = int(item.get("line_number", 0))
+                        severity = item.get("severity", "INFO").upper()
 
-            return ReviewResult(status=status, summary=summary, comments=validated_comments)
+                        # Validate line number
+                        if fp in valid_lines_map and valid_lines_map[fp]:
+                            valid_set = valid_lines_map[fp]
+                            if line not in valid_set:
+                                line = min(valid_set, key=lambda x: abs(x - line))
 
-        except Exception as e:
-            logger.exception("Lỗi trong quá trình gọi Gemini Reviewer: %s", e)
-            return ReviewResult(
-                status="COMMENT",
-                summary=f"Không thể hoàn thành review do lỗi: {str(e)}",
-                comments=[],
-            )
+                        validated_comments.append(
+                            ReviewComment(
+                                file_path=fp,
+                                line_number=line,
+                                severity=severity,
+                                rule_id=item.get("rule_id", "GENERAL"),
+                                comment=item.get("comment", ""),
+                                suggestion=item.get("suggestion", ""),
+                            )
+                        )
+
+                    # Determine final status
+                    has_critical = any(c.severity == "CRITICAL" for c in validated_comments)
+                    has_warning = any(c.severity == "WARNING" for c in validated_comments)
+
+                    status = "CHANGES_REQUESTED" if has_critical else ("COMMENT" if has_warning else "APPROVED")
+                    summary = parsed.get("summary", "Đã hoàn thành đánh giá mã nguồn.")
+
+                    return ReviewResult(status=status, summary=summary, comments=validated_comments)
+
+                except Exception as e:
+                    last_error_msg = str(e)
+                    logger.warning(f"Lỗi khi gọi model {current_model} ở lần thử {attempt}: {e}")
+                    if attempt < 3:
+                        time.sleep(attempt * 2)
+
+            logger.warning(f"Model {current_model} không phản hồi sau 3 lần thử. Chuyển sang model tiếp theo trong danh sách (nếu có)...")
+
+        # If all retries and fallback models fail
+        logger.error("Tất cả các model Gemini đều thất bại do nghẽn mạng hoặc quá tải.")
+        return ReviewResult(
+            status="COMMENT",
+            summary="Không thể hoàn thành review do lỗi quá tải từ Gemini API.",
+            comments=[],
+            is_error=True,
+            error_message=last_error_msg,
+        )

@@ -98,16 +98,27 @@ def main() -> int:
         )
         return 1
 
-    # 3. Tầng 2: Semantic Review bằng Gemini LLM
+    # 3. Lọc các file thực sự là mã nguồn (bỏ qua tài liệu .md, ảnh, file cấu hình tĩnh)
+    NON_CODE_EXTENSIONS = {".md", ".txt", ".rst", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".lock", ".gitignore"}
+    code_diffs = [
+        fd for fd in file_diffs
+        if not fd.is_deleted and Path(fd.file_path).suffix.lower() not in NON_CODE_EXTENSIONS
+    ]
+
+    if not code_diffs:
+        logger.info("PR chỉ chứa thay đổi tài liệu / hình ảnh (không có file mã nguồn). Bỏ qua Tầng 2 AI Review để tiết kiệm token.")
+        return 0
+
+    # 4. Tầng 2: Semantic Review bằng Gemini LLM
     reviewer = GeminiReviewer(
         api_key=config.gemini_api_key,
         model=config.gemini_model,
         guidelines_path=config.guidelines_path,
     )
 
-
-    review_res = reviewer.review_diffs(file_diffs)
+    review_res = reviewer.review_diffs(code_diffs)
     logger.info(f"Hoàn thành review: {review_res.status} ({len(review_res.comments)} nhận xét).")
+
 
     # 4. Xuất kết quả
     if config.dry_run or not config.github_token or not config.pr_number:

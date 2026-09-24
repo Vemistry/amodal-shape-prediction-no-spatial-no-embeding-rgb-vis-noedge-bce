@@ -50,13 +50,19 @@ class GitHubPoster:
         lines.append(f"**Tóm tắt:** {review_res.summary}")
         lines.append("")
 
-        if review_res.comments:
+        if review_res.is_error:
+            lines.append("⚠️ **Thông báo:** Quá trình AI Review không thể hoàn thành do sự cố từ dịch vụ LLM.")
+            if review_res.error_message:
+                lines.append(f"```text\n{review_res.error_message}\n```")
+            lines.append("👉 *Gợi ý: Lỗi 503 (High Demand) thường là tạm thời do Google API nghẽn tải. Bạn có thể nhấn 'Re-run all jobs' trên GitHub Actions sau 1–2 phút.*")
+        elif review_res.comments:
             lines.append(f"### Chi tiết các nhận xét ({len(review_res.comments)} vị trí):")
             for c in review_res.comments:
                 lines.append(f"#### 📍 `{c.file_path}` (Dòng {c.line_number})")
                 lines.append(c.to_markdown())
         else:
             lines.append("✨ *Không phát hiện vi phạm logic hoặc kiến trúc đáng kể nào!*")
+
 
         return "\n".join(lines)
 
