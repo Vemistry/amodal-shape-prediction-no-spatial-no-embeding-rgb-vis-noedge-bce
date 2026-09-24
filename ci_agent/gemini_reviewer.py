@@ -154,14 +154,36 @@ class GeminiReviewer:
                     if not candidates:
                         return ReviewResult(status="COMMENT", summary="LLM không trả về kết quả đánh giá.", comments=[])
 
-                    raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
+                    raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}").strip()
+                    if raw_text.startswith("```"):
+                        lines = raw_text.splitlines()
+                        if lines[0].startswith("```"):
+                            lines = lines[1:]
+                        if lines and lines[-1].startswith("```"):
+                            lines = lines[:-1]
+                        raw_text = "\n".join(lines).strip()
+
                     parsed = json.loads(raw_text)
+
+                    # Extract comments and summary whether parsed is dict or list
+                    raw_comments = []
+                    summary = "Đã hoàn thành đánh giá mã nguồn."
+                    parsed_status = None
+
+                    if isinstance(parsed, list):
+                        raw_comments = parsed
+                    elif isinstance(parsed, dict):
+                        raw_comments = parsed.get("comments", [])
+                        summary = parsed.get("summary", summary)
+                        parsed_status = parsed.get("status")
 
                     # Build line validator lookup: {file_path: set(valid_lines)}
                     valid_lines_map = {fd.file_path: fd.valid_new_lines for fd in file_diffs}
 
                     validated_comments: list[ReviewComment] = []
-                    for item in parsed.get("comments", []):
+                    for item in raw_comments:
+                        if not isinstance(item, dict):
+                            continue
                         fp = item.get("file_path", "")
                         line = int(item.get("line_number", 0))
                         severity = item.get("severity", "INFO").upper()
@@ -187,8 +209,7 @@ class GeminiReviewer:
                     has_critical = any(c.severity == "CRITICAL" for c in validated_comments)
                     has_warning = any(c.severity == "WARNING" for c in validated_comments)
 
-                    status = "CHANGES_REQUESTED" if has_critical else ("COMMENT" if has_warning else "APPROVED")
-                    summary = parsed.get("summary", "Đã hoàn thành đánh giá mã nguồn.")
+                    status = "CHANGES_REQUESTED" if has_critical else ("COMMENT" if has_warning else (parsed_status or "APPROVED"))
 
                     return ReviewResult(status=status, summary=summary, comments=validated_comments)
 
