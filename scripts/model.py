@@ -65,9 +65,11 @@ class UpBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         # Tích chập chuyển vị (Deconvolution): giảm kênh 1/2, tăng kích thước 2x
-        self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=3)
+        self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
         # Xử lý sau khi nối với skip connection
         self.conv = DoubleConv(in_channels, out_channels)
+
+
 
     def forward(self, x_decoder, x_skip):
         """
@@ -82,6 +84,7 @@ class UpBlock(nn.Module):
         """
         # Phóng tỉ lệ lên 2 lần
         x_up = self.up(x_decoder)
+        x_up = self.up(x_up)
         # Nối chiều kênh: [skip, upsampled]
         x_concat = torch.cat([x_skip, x_up], dim=1)
         # Xử lý tích chập trên kết hợp
