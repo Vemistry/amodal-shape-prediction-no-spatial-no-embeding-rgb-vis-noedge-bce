@@ -1,199 +1,209 @@
-# ĐỀ XUẤT KIẾN TRÚC HỆ THỐNG AI CODE REVIEW NỘI BỘ (IN-HOUSE & ON-PREMISE)
+# TÀI LIỆU THIẾT KẾ KIẾN TRÚC & HƯỚNG DẪN TRIỂN KHAI HỆ THỐNG AI CODE REVIEW (CI/CD)
 
-> **Mục tiêu:** Xây dựng giải pháp tự động hóa Code Review bằng AI tích hợp vào quy trình CI/CD nội bộ của doanh nghiệp. Hệ thống được thiết kế theo tiêu chí **100% On-Premise / Zero 3rd-Party SaaS**, bảo mật tuyệt đối mã nguồn, không phát sinh chi phí duy trì cụm server riêng biệt (Zero-Server Overhead), và tối ưu thời gian phản hồi cho lập trình viên.
-
----
-
-## 1. Đánh giá Khách quan & Định hướng Chuyển đổi Kiến trúc
-
-Bản đề xuất sơ khởi ban đầu (sử dụng Neo4j + Vector DB + ReAct Agent) có ý tưởng tốt về mặt **Impact Analysis (Phân tích ảnh hưởng dây chuyền)**, nhưng tồn tại các rào cản lớn khi áp dụng vào môi trường doanh nghiệp nội bộ:
-
-| Tiêu chí                                  | Kiến trúc Sơ khởi (Neo4j + VectorDB)                                      | Rủi ro trong môi trường Doanh nghiệp                                                                             | Định hướng Kiến trúc Mới (Tinh gọn & Thực tế)                                                                                        |
-| :---------------------------------------- | :------------------------------------------------------------------------ | :--------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
-| **Hạ tầng (Infrastructure)**              | Cần duy trì cụm Neo4j Server + Vector DB Server 24/7.                     | Tăng gánh nặng vận hành cho DevOps; tốn tài nguyên server; nguy cơ downtime DB làm nghẽn toàn bộ CI/CD.          | **Zero-Server (Ephemeral Container):** Toàn bộ công cụ đóng gói trong 1 Docker Image, chạy và giải phóng ngay trong CI Runner.       |
-| **Phân tích Mã nguồn (Code Graph)**       | Parse AST bằng Tree-sitter rồi nạp vào Neo4j; sinh câu lệnh Cypher tự do. | AST đơn thuần không giải quyết được Call Graph / Type Inference; Text-to-Cypher dễ hallucinate và treo truy vấn. | **In-memory Graph + Static Indexer:** Dùng Tree-sitter + `networkx` trong RAM hoặc LSP / Pyright CLI để tìm callers/callees tức thì. |
-| **Quản lý Quy chuẩn (Guidelines)**        | Đưa file guidelines vào Vector DB để làm RAG.                             | Chunking làm đứt gãy ngữ cảnh quy tắc chéo; tăng thêm 1 DB dependency không cần thiết cho 1 file tài liệu ngắn.  | **System Prompt Structuring:** Nạp trực tiếp guidelines vào System Prompt của LLM theo từng tag/domain tương ứng với PR.             |
-| **Phân bổ Trách nhiệm (Task Delegation)** | Dùng LLM bắt cả lỗi Syntax, PEP 8, Naming convention.                     | Chậm, tốn chi phí token/GPU nội bộ, dễ báo lỗi giả (false positives).                                            | **2-Tier Pipeline:** Tách lớp Deterministic (Linter/SAST miễn phí) và lớp Semantic (AI chỉ review logic/kiến trúc).                  |
-| **Bảo mật & Bên thứ 3**                   | Nguy cơ phụ thuộc vào các dịch vụ SaaS bên ngoài.                         | Vi phạm chính sách bảo mật mã nguồn và IP của doanh nghiệp.                                                      | **100% In-house / Self-hosted:** Dùng tool Open-Source CLI + LLM On-Premise (hoặc Private Gateway).                                  |
+> **Mục tiêu:** Xây dựng hệ thống tự động hóa Code Review bằng AI tích hợp vào quy trình CI/CD (GitHub Actions / GitLab CI). Hệ thống giải phóng thời gian cho các Tech Lead/Mentor, bắt triệt để lỗi cú pháp, bảo mật và vi phạm quy chuẩn ngay khi tạo Pull Request (PR) trước khi con người vào duyệt nghiệp vụ cuối cùng.
 
 ---
 
-## 2. Kiến trúc Tổng thể: Mô hình Phân tầng (2-Tier Pipeline)
+## 1. Tổng quan Kiến trúc Hệ thống: Mô hình Phân tầng (2-Tier Pipeline)
 
-Quy trình được đóng gói hoàn toàn trong một **Ephemeral Docker Container** chạy trên GitLab CI Runner hoặc GitHub Actions Runner nội bộ:
+Hệ thống được thiết kế theo triết lý **phân định ranh giới rõ ràng** giữa việc máy làm tốt nhất (deterministic) và việc AI làm tốt nhất (semantic), tránh lãng phí tài nguyên và loại bỏ hoàn toàn các lỗi ngớ ngẩn trước khi gọi LLM.
 
 ```mermaid
 flowchart TD
-    A["Developer mở / cập nhật Pull Request"] --> B["GitLab CI / GitHub Actions kích hoạt Runner"]
+    A["Developer mở / cập nhật Pull Request"] --> B["CI/CD kích hoạt Ephemeral Container"]
 
-    subgraph Tier1["Tầng 1: Deterministic Gate (Thời gian: < 5 giây | Chi phí: 0$)"]
+    subgraph Tier1["TẦNG 1: DETERMINISTIC GATE (Không dùng AI | Tốc độ < 3s | Chi phí 0$)"]
         direction TB
-        T1_1["Git Diff: Lấy danh sách file và dòng code thay đổi"]
-        T1_2["Linter & Formatter: Ruff (Python) / ESLint (JS/TS)"]
-        T1_3["SAST Scanner: Semgrep OSS (Offline Ruleset)"]
+        T1_1["1. Bóc tách Git Diff (File & Dòng thay đổi)"]
+        T1_2["2. Quét bảo mật tĩnh & Lộ Secret (Regex Scanner)"]
+        T1_3["3. Kiểm tra Cú pháp & Static Linting (Ruff / AST Parse)"]
 
         T1_1 --> T1_2 --> T1_3
     end
 
     B --> Tier1
-    Tier1 --> C{"Có lỗi Cú pháp hoặc Lỗ hổng Bảo mật nặng?"}
+    Tier1 --> C{"Tầng 1 có lỗi Cú pháp / Secret không?"}
 
-    C -- "CÓ LỖI" --> D["DỪNG PIPELINE NGAY LẬP TỨC<br/>- Trả báo cáo lỗi Linter/SAST về PR<br/>- Không gọi LLM (Tiết kiệm 100% tài nguyên GPU)"]
+    C -- "CÓ LỖI (Fail-Fast)" --> D["DỪNG NGAY LẬP TỨC<br/>- Báo lỗi Linter về PR<br/>- Không gọi LLM (Tiết kiệm 100% token/GPU)"]
 
-    C -- "SẠCH LỖI" --> Tier2
+    C -- "VƯỢT QUA (PASS)" --> Tier2
 
-    subgraph Tier2["Tầng 2: Semantic & Impact AI Review (Thời gian: 15 - 30 giây)"]
+    subgraph Tier2["TẦNG 2: SEMANTIC AI REVIEW (Đánh giá Logic & Kiến trúc | 15 - 30s)"]
         direction TB
-        T2_1["Trích xuất Ngữ cảnh Ảnh hưởng (In-memory Call Graph / Tree-sitter)"]
-        T2_2["Nạp Bộ quy tắc Nội bộ từ AI_REVIEW_GUIDELINES.md"]
-        T2_3["Tổng hợp Prompt: Git Diff + Impact Context + Guidelines"]
-        T2_4["Gọi Mô hình LLM Nội bộ (vLLM / Ollama: Qwen2.5-Coder / DeepSeek-Coder)"]
-        T2_5["Parser & Formatter: Chuẩn hóa Output thành Inline Comments"]
+        T2_1["1. Lọc tập hợp dòng thay đổi hợp lệ (Valid New Lines Mapping)"]
+        T2_2["2. Nạp Bộ quy tắc nội bộ từ AI_REVIEW_GUIDELINES.md vào System Prompt"]
+        T2_3["3. Gửi Diff & Prompt tới LLM (Gemini Cloud hoặc On-Premise LLM)"]
+        T2_4["4. Chuẩn hóa Output theo JSON Schema nghiêm ngặt"]
+        T2_5["5. Đăng kết quả (Inline Comments + Review Summary) lên Git"]
 
         T2_1 & T2_2 --> T2_3 --> T2_4 --> T2_5
     end
 
-    Tier2 --> E["Đẩy Inline Comments trực tiếp vào từng dòng code trên Git PR"]
-    E --> F["Developer nhận phản hồi tức thì và tiến hành chỉnh sửa"]
+    Tier2 --> E["Developer nhận phản hồi tức thì và sửa code theo gợi ý"]
 ```
 
 ---
 
-## 3. Thiết kế Kỹ thuật Chi tiết (4 Giai đoạn)
+## 2. Thiết kế Chi tiết Tầng 1: Deterministic Gate (Kiểm tra Tĩnh & Cố định)
 
-### Giai đoạn 1: Deterministic Gate (Kiểm tra Cố định Cục bộ)
+### 2.1. Tầng 1 hoạt động như thế nào?
+1. **Lấy dữ liệu thay đổi:** Dùng lệnh git CLI (`git diff origin/main...HEAD`) hoặc Git API để bóc tách các file và khối code (hunks) vừa được thêm mới hoặc chỉnh sửa.
+2. **Quét Secret & Dữ liệu nhạy cảm:** Chạy quét regex cục bộ để phát hiện ngay lập tức các API Key, Private Key, Token, Password bị hardcode trong source code.
+3. **Kiểm tra Cú pháp & Static Analysis:**
+   - Với Python: Chạy engine `ruff` (linter viết bằng Rust, tốc độ siêu tốc < 50ms) kết hợp `ast.parse` của Python chuẩn để phát hiện mọi lỗi cú pháp (`SyntaxError`), biến chưa định nghĩa, hoặc import lỗi.
+   - Với JS/TS: Chạy `eslint --quiet`.
+4. **Cơ chế Fail-Fast:** Nếu phát hiện bất kỳ lỗi cú pháp hoặc lộ secret nào, hệ thống lập tức xuất báo cáo lỗi và **dừng pipeline ngay**, không chuyển tiếp sang Tầng 2.
 
-Không sử dụng LLM cho các tác vụ kiểm tra cú pháp và định dạng. Tầng này chạy các công cụ CLI mã nguồn mở, offline hoàn toàn:
+### 2.2. Làm sao để tin tưởng Tầng 1?
+* **Tính tất định 100% (Deterministic):** Không phụ thuộc vào xác suất hay "ảo giác" (hallucination) như AI. Cú pháp sai là `ast.parse` và `ruff` bắt chính xác 100% dòng vi phạm theo chuẩn đặc tả của ngôn ngữ lập trình.
+* **Thời gian thực thi tức thì (< 3 giây):** Toàn bộ quá trình chạy hoàn toàn offline trên CPU của CI runner, không mất thời gian gọi mạng.
+* **Chi phí vận hành = 0$:** Không tốn bất kỳ 1 token LLM hay chu kỳ tính toán GPU nào cho các lỗi cú pháp ngớ ngẩn.
 
-1. **Linter & Formatter:**
-   - **Python:** Sử dụng `ruff` (viết bằng Rust, tốc độ siêu tốc < 50ms, thay thế hoàn toàn `flake8`, `black`, `isort`).
-   - **JavaScript/TypeScript:** Sử dụng `eslint` + `prettier`.
-2. **Static Application Security Testing (SAST):**
-   - Sử dụng **Semgrep OSS** ở chế độ offline (`semgrep scan --config p/security-audit --config p/owasp-top-ten`).
-   - Bắt triệt để các lỗi: Hardcoded Secrets, SQL Injection, Command Injection, XSS cơ bản.
-3. **Cơ chế Fail-fast:** Nếu tầng này phát hiện lỗi, pipeline dừng ngay và gửi phản hồi cho Dev. LLM sẽ **không** được kích hoạt.
-
----
-
-### Giai đoạn 2: Phân tích Ảnh hưởng Dây chuyền (In-Memory Impact Analysis)
-
-Thay vì duy trì cơ sở dữ liệu đồ thị Neo4j cồng kềnh, phân tích phụ thuộc được thực hiện ngay trong bộ nhớ RAM của CI runner:
-
-1. **Xác định Vùng thay đổi:**
-   - Dùng lệnh `git diff origin/main...HEAD` để bóc tách các file, class, và hàm vừa được thêm mới hoặc chỉnh sửa.
-2. **Xây dựng Đồ thị Cục bộ (In-memory Call Graph):**
-   - Dùng **Tree-sitter** kết hợp thư viện đồ thị Python `networkx` để parse AST của các file liên quan.
-   - Hoặc dùng công cụ index symbol tĩnh như **Universal Ctags** / **Pyright CLI** để truy vết:
-     - _Hàm `process_data()` bị sửa đổi ở PR này đang được gọi bởi những hàm/file nào khác?_
-     - _Chữ ký hàm (signature) có bị thay đổi gây breaking change ở các module phụ thuộc không?_
-3. **Đóng gói Ngữ cảnh (Context Packing):**
-   - Chỉ trích xuất phần code của các hàm caller/callee bị ảnh hưởng trực tiếp (tối đa 1-2 bậc) để đưa vào context của LLM. Tránh nhồi toàn bộ codebase làm loãng sự chú ý của mô hình.
+### 2.3. Các file cấu thành Tầng 1:
+* `ci_agent/tier1_linter.py`: Engine điều phối kiểm tra cú pháp, quét regex secret và bắt lỗi fail-fast.
+* `pyproject.toml` hoặc `.ruff.toml` (tùy chọn): Cung cấp các rule linter chuẩn của dự án.
 
 ---
 
-### Giai đoạn 3: Quản lý và Tinh lọc Bộ Tiêu chuẩn (`AI_REVIEW_GUIDELINES.md`)
+## 3. Thiết kế Chi tiết Tầng 2: Semantic AI Review (Đánh giá Ngữ nghĩa & Kiến trúc)
 
-Tài liệu hướng dẫn được lưu trữ trực tiếp trong repository, được kiểm soát phiên bản qua Git:
+### 3.1. Tầng 2 hoạt động như thế nào?
+Tầng 2 chỉ kích hoạt khi Tầng 1 đã PASS sạch sẽ. Lúc này code đã chuẩn cú pháp, LLM chỉ tập trung vào việc con người cần: **Logic nghiệp vụ, bẫy tài nguyên, lỗ hổng logic, và vi phạm quy chuẩn dự án.**
 
-1. **Không dùng Vector DB:** Toàn bộ nội dung file được đọc trực tiếp và tích hợp vào **System Prompt** của LLM.
-2. **Phân vùng Tiêu chuẩn (Tagged Guidelines):**
-   - Chỉ nạp các quy tắc liên quan đến loại file thay đổi (ví dụ: PR chỉ sửa migration/database thì chỉ nạp quy tắc nhóm `[DATABASE]`, không nạp quy tắc nhóm `[FRONTEND]`).
-3. **Cấu trúc Tiêu chuẩn (Format Chuẩn hóa):**
-   Mỗi quy tắc bắt buộc phải có đủ 4 yếu tố:
-   ```markdown
-   ### [RULE-DB-01] Bắt buộc sử dụng Soft Delete cho các Entity cốt lõi
-
-   - **Mô tả:** Không bao giờ gọi hàm `.delete()` trực tiếp trên các model tài chính/người dùng; phải cập nhật trường `is_deleted = True` hoặc `deleted_at`.
-   - **Lý do:** Đảm bảo khả năng kiểm toán (audit trail) và phục hồi dữ liệu khi có sự cố.
-   - **Bad:**
-     user = User.objects.get(id=user_id)
-     user.delete()
-   - **Good:**
-     user = User.objects.get(id=user_id)
-     user.soft_delete(deleted_by=request.user)
+1. **Mapping dòng code hợp lệ (Line Mapping):** Module `git_diff_extractor.py` bóc tách từng hunk của diff, lập danh sách tập hợp các số dòng thực tế được thêm mới hoặc chỉnh sửa (`valid_new_lines`).
+2. **Nạp Bộ Quy Chuẩn Dự Án (`AI_REVIEW_GUIDELINES.md`):** Đọc trực tiếp nội dung file guidelines từ thư mục gốc của repository và nhúng thẳng vào **System Prompt** của LLM.
+3. **Truy vấn LLM với Structured Output:** Yêu cầu mô hình phân tích diff theo tiêu chuẩn nội bộ và trả về mảng JSON có cấu trúc rõ ràng:
+   ```json
+   [
+     {
+       "file_path": "scripts/model.py",
+       "line_number": 87,
+       "severity": "CRITICAL",
+       "rule_id": "RULE-ARCH-01",
+       "comment": "Biến x_up bị gán bằng None dẫn đến lỗi TypeError khi đưa vào torch.cat ở dòng tiếp theo.",
+       "suggestion": "# Xóa dòng x_up = None để duy trì Tensor x_up hợp lệ"
+     }
+   ]
    ```
+4. **Xác thực dòng nhận xét (Line Guardrail):** Trước khi gửi lên Git, hệ thống kiểm tra `line_number` của từng comment. Nếu AI chỉ định một dòng nằm ngoài vùng diff, hệ thống sẽ tự động căn chỉnh về dòng hợp lệ gần nhất hoặc đưa vào báo cáo tổng quát, ngăn chặn hoàn toàn lỗi API từ GitHub/GitLab.
+5. **Ghim Inline Comments:** Gọi API của Git Platform để tạo Pull Request Review, đính kèm comment và khối gợi ý code (`suggestion`) trực tiếp vào từng dòng vi phạm.
+
+### 3.2. Các file cấu thành Tầng 2:
+* `ci_agent/AI_REVIEW_GUIDELINES.md`: Bộ luật chuẩn hóa nội bộ của team (định dạng Rule, Bad, Good).
+* `ci_agent/git_diff_extractor.py`: Trích xuất diff và parse ánh xạ dòng code hợp lệ.
+* `ci_agent/gemini_reviewer.py`: Client giao tiếp với LLM và parse cấu trúc JSON.
+* `ci_agent/github_poster.py`: Format báo cáo Markdown và gọi REST API đăng review.
+* `ci_agent/main.py`: Entrypoint CLI điều phối toàn bộ workflow.
 
 ---
 
-### Giai đoạn 4: Điều phối Review & Tích hợp Git Nội bộ
+## 4. Phương án Chuyển Đổi sang LLM Local (On-Premise) Thay Vì Gemini Cloud
 
-1. **Lựa chọn Mô hình LLM (Đảm bảo Không Leak Code):**
-   - **Phương án Khuyến nghị (On-Premise GPU):** Triển khai server suy luận nội bộ bằng **vLLM** hoặc **Ollama**.
-     - Model ưu tiên: `Qwen2.5-Coder-32B-Instruct` (chất lượng review tương đương GPT-4o, hỗ trợ tiếng Anh & tiếng Việt tốt).
-     - Model cho phần cứng vừa phải: `Qwen2.5-Coder-14B-Instruct` hoặc `DeepSeek-Coder-V2-Lite`.
-   - **Phương án Doanh nghiệp (Private Enterprise Cloud Gateway):** Nếu công ty có tài khoản Azure OpenAI / GCP Vertex AI với thỏa thuận pháp lý **Zero Data Retention** (dữ liệu không bị lưu trữ hay dùng để train model).
-2. **Định dạng Output (Structured Output):**
-   - Yêu cầu LLM trả kết quả theo chuẩn **JSON Schema** nghiêm ngặt:
-     ```json
-     [
-       {
-         "file_path": "src/services/payment.py",
-         "line_number": 42,
-         "severity": "CRITICAL",
-         "rule_id": "RULE-SEC-03",
-         "comment": "Phát hiện thiếu Database Transaction khi thực hiện chuyển tiền. Nếu bước trừ tiền thành công nhưng bước ghi log thất bại, dữ liệu sẽ bị mất đồng bộ.",
-         "suggestion": "Bọc khối code này trong `with transaction.atomic():`"
-       }
-     ]
-     ```
-3. **Post Inline Comments:**
-   - Script CI đọc mảng JSON và gọi API của Git Platform nội bộ (GitLab REST API: `/projects/:id/merge_requests/:mr_id/discussions` hoặc GitHub Enterprise Pull Request Review API).
-   - Comment được ghim chính xác vào từng dòng code vi phạm trên giao diện web của PR.
+Nếu công ty có chính sách bảo mật khắt khe, **tuyệt đối không được gửi mã nguồn ra internet**, hệ thống có thể chuyển đổi sang chạy mô hình mã nguồn mở nội bộ 100% một cách dễ dàng mà không làm thay đổi kiến trúc tổng thể.
 
----
-
-## 4. Công nghệ Đề xuất (Tech Stack Nội bộ Tinh gọn)
-
-| Lớp thành phần           | Công nghệ Đề xuất                                       | Trạng thái Bản quyền & Bảo mật                             |
-| :----------------------- | :------------------------------------------------------ | :--------------------------------------------------------- |
-| **CI/CD Platform**       | GitLab CI / GitHub Actions Self-Hosted Runner           | Hệ thống sẵn có của công ty.                               |
-| **Container Engine**     | Docker / Kaniko                                         | Đóng gói môi trường thực thi độc lập.                      |
-| **Linter & Formatter**   | `ruff` (Python) / `eslint` (Node.js)                    | Mã nguồn mở (MIT / Apache), chạy offline 100%.             |
-| **SAST Engine**          | `semgrep` CLI (OSS)                                     | Mã nguồn mở (LGPL), chạy offline với rule chuẩn.           |
-| **AST & Dependency**     | `tree-sitter`, `networkx`, `universal-ctags`            | Thư viện Python cục bộ, xử lý in-memory.                   |
-| **LLM Inference Engine** | **vLLM** hoặc **Ollama** (chạy trên máy chủ GPU nội bộ) | Mã nguồn mở, quản lý và scale model tự host.               |
-| **Foundation Model**     | `Qwen2.5-Coder-32B-Instruct` / `14B`                    | Open-weights, thương mại hóa tự do, chuyên sâu về Code.    |
-| **Git API Client**       | `python-gitlab` / `PyGithub`                            | Giao tiếp nội bộ qua Git Personal Access Token / CI Token. |
-
----
-
-## 5. Lộ trình Triển khai từ "Hàng Mẫu" (PoC) đến Toàn Doanh Nghiệp
-
-Để đảm bảo dự án thành công mà không bị sa đà vào bẫy kỹ thuật, lộ trình được chia thành 3 giai đoạn rõ rệt:
-
-```mermaid
-gantt
-    title Lộ trình Triển khai Hệ thống AI Code Review
-    dateFormat  YYYY-MM-DD
-    section Giai đoạn 1 (PoC Tinh gọn)
-    Viết script Git Diff + Prompt + LLM Call       :2026-10-01, 7d
-    Tích hợp Post Inline Comment lên PR mẫu       :2026-10-08, 5d
-    Xây dựng file AI_REVIEW_GUIDELINES.md mẫu      :2026-10-13, 3d
-    section Giai đoạn 2 (Hoàn thiện Engine)
-    Tích hợp Ruff & Semgrep CLI (Tier 1)          :2026-10-16, 5d
-    Xây dựng In-memory Impact Analysis (Tier 2)   :2026-10-21, 7d
-    Chuẩn hóa JSON Output & Error Handling        :2026-10-28, 4d
-    section Giai đoạn 3 (Đóng gói & Phổ biến)
-    Đóng gói Docker Image chung                   :2026-11-01, 4d
-    Viết CI/CD Template tái sử dụng (.gitlab-ci)  :2026-11-05, 3d
-    Áp dụng thử nghiệm trên 2 project thực tế     :2026-11-08, 14d
+```
++--------------------------------------------------------------------------+
+|  MÁY CHỦ GPU NỘI BỘ (ON-PREMISE)                                         |
+|                                                                          |
+|  [Hardware: 1x GPU RTX 3090 / 4090 (24GB) hoặc A10 / A100]               |
+|                                                                          |
+|  +--------------------------------------------------------------------+  |
+|  | Inference Engine: vLLM hoặc Ollama (Docker Container)              |  |
+|  | Model: Qwen2.5-Coder-14B / 32B-Instruct-AWQ (Hỗ trợ tốt Tiếng Việt)|  |
+|  | Endpoint: http://llm-gateway.internal:8000/v1                      |  |
+|  +--------------------------------------------------------------------+  |
++--------------------------------------------------------------------------+
+                                  ▲
+                                  │ (Giao thức HTTP OpenAI-Compatible)
+                                  │
++--------------------------------------------------------------------------+
+|  CI/CD RUNNER (GitLab Runner / GitHub Actions Runner Nội Bộ)             |
+|                                                                          |
+|  python -m ci_agent.main                                                 |
+|    --base-url "http://llm-gateway.internal:8000/v1"                      |
+|    --model "qwen2.5-coder-32b"                                           |
++--------------------------------------------------------------------------+
 ```
 
-### Bước 1: Xây dựng MVP trên Project Hiện tại (Thời gian: ~1–2 tuần)
+### 4.1. Phần cứng & Hạ tầng Yêu cầu:
+* **GPU đề xuất:** 1x GPU Nvidia có VRAM từ **16GB – 24GB** (RTX 3090, RTX 4090, A10, L4).
+* **RAM hệ thống:** 32GB – 64GB.
 
-- Không cài đặt database ngoài.
-- Viết 1 script Python `review_pr.py`:
-  1. Lấy Git diff qua lệnh git CLI.
-  2. Đọc file `AI_REVIEW_GUIDELINES.md`.
-  3. Gửi prompt tới endpoint LLM (vLLM hoặc Ollama nội bộ).
-  4. Đẩy comment lên PR để kiểm chứng độ hữu ích của nội dung review.
+### 4.2. Khung suy luận (Inference Engine) & Mô hình khuyên dùng:
+* **Engine:** Sử dụng **vLLM** (khuyên dùng cho production vì thông lượng cao, hỗ trợ PagedAttention) hoặc **Ollama** (setup cực nhanh, nhẹ).
+* **Mô hình mã nguồn mở tốt nhất hiện nay:**
+  1. `Qwen2.5-Coder-32B-Instruct` (bản lượng tử hóa AWQ/GPTQ chạy vừa vặn trên 1 GPU 24GB, năng lực review tương đương GPT-4o, hiểu tiếng Việt và tiếng Anh rất tốt).
+  2. `Qwen2.5-Coder-14B-Instruct` (rất nhẹ, chạy mượt mà trên GPU 16GB VRAM, tốc độ suy luận nhanh).
+  3. `DeepSeek-Coder-V2-Lite` (kiến trúc MoE, tiết kiệm tài nguyên).
 
-### Bước 2: Bổ sung Tier 1 Linter & In-memory Context (Thời gian: ~1–2 tuần)
+### 4.3. Chuyển đổi mã nguồn trong hệ thống:
+Cả `vLLM` và `Ollama` đều cung cấp sẵn giao diện REST API chuẩn **OpenAI-Compatible** (`/v1/chat/completions`). Do đó:
+* Bạn chỉ cần thay đổi biến môi trường:
+  * `LLM_BASE_URL="http://llm-gateway.internal:8000/v1"`
+  * `LLM_MODEL="qwen2.5-coder-32b"`
+  * `LLM_API_KEY="none"` (hoặc internal token)
+* Toàn bộ logic bóc tách Git Diff, kiểm tra Tầng 1, và đăng comment của Tầng 2 **giữ nguyên 100% không cần viết lại**.
 
-- Thêm bước chạy `ruff` và `semgrep`. Nếu có lỗi, fail ngay lập tức.
-- Bổ sung parser Tree-sitter để trích xuất thêm các hàm liên quan trực tiếp đến hàm vừa sửa.
+---
 
-### Bước 3: Đóng gói Docker & Phổ biến Toàn Doanh nghiệp (Thời gian: ~1 tuần)
+## 5. Hướng dẫn Triển khai: Từ "Hàng Mẫu" (PoC) đến "Scale Toàn Doanh Nghiệp"
 
-- Đóng gói toàn bộ script, ruleset của Semgrep, và các công cụ vào 1 Docker image duy nhất (ví dụ: `registry.mycompany.com/devops/ai-code-reviewer:latest`).
-- Tạo một file mẫu `.gitlab-ci.yml` (hoặc GitHub Action Reusable Workflow). Bất kỳ team nào trong công ty muốn dùng chỉ cần include 3–5 dòng cấu hình vào pipeline CI là hoàn tất.
+### 5.1. Giai đoạn 1: Hàng mẫu (PoC tại repository hiện tại)
+* Mục đích: Thử nghiệm thực tế luồng review, kiểm tra chất lượng comment và tinh chỉnh luật review.
+* Cấu trúc: Thư mục `ci_agent/` và `.github/workflows/ai_code_review.yml` được đặt trực tiếp trong repository này để dev có thể sửa code và test ngay lập tức.
+
+### 5.2. Giai đoạn 2: Chuẩn hóa cho Toàn Doanh Nghiệp (Centralized Engine)
+> **CẢNH BÁO QUAN TRỌNG:** Khi triển khai cho hàng chục dự án trong công ty, **TUYỆT ĐỐI KHÔNG COPY** cả thư mục `ci_agent/` vào từng repo con (gây phân mảnh mã nguồn và cực hình khi bảo trì).
+
+**Mô hình chuẩn Doanh nghiệp:**
+1. Tạo một repository trung tâm duy nhất: `company-devops/ai-code-reviewer`.
+2. Đóng gói toàn bộ code của `ci_agent` thành một **Docker Image chung** và đẩy lên Container Registry nội bộ:
+   ```bash
+   docker build -t registry.company.com/devops/ai-code-reviewer:latest .
+   docker push registry.company.com/devops/ai-code-reviewer:latest
+   ```
+3. Khi đó, **mỗi dự án con trong công ty CHỈ CẦN 2 THÀNH PHẦN DUY NHẤT**:
+   * **Thành phần 1:** File `AI_REVIEW_GUIDELINES.md` đặt ở thư mục gốc (chứa các quy tắc riêng của dự án đó).
+   * **Thành phần 2:** File workflow CI/CD `.github/workflows/ai_review.yml` ngắn gọn chỉ ~10 dòng:
+     ```yaml
+     name: AI Code Review
+     on:
+       pull_request:
+         types: [opened, synchronize, reopened]
+     permissions:
+       contents: read
+       pull-requests: write
+     jobs:
+       review:
+         runs-on: ubuntu-latest
+         container:
+           image: registry.company.com/devops/ai-code-reviewer:latest
+         steps:
+           - uses: actions/checkout@v4
+             with:
+               fetch-depth: 0
+           - name: Execute Review
+             env:
+               GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || vars.GEMINI_API_KEY }}
+               GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+             run: python -m ci_agent.main --pr "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}"
+     ```
+
+---
+
+## 6. Các Lưu Ý Sống Còn Khi Sử Dụng & Vận Hành (Gotchas & Best Practices)
+
+Trong quá trình chạy thực tế, cần tuân thủ các nguyên tắc kỹ thuật sau để tránh lỗi hệ thống:
+
+1. **Luôn dùng `event: "COMMENT"` khi gửi Review trên GitHub:**
+   * **Lỗi kinh điển:** Gửi `event: "APPROVE"` từ GitHub Actions sẽ bị GitHub chặn với mã lỗi `422 Unprocessable Entity ("GitHub Actions is not permitted to approve pull requests")`.
+   * **Quy ước:** Bot luôn gửi review với `event: "COMMENT"`. Kết luận duyệt (`✅ APPROVE` hay `❌ CHANGES REQUESTED`) được hiển thị bằng biểu tượng trực quan ngay trong nội dung báo cáo Markdown.
+2. **Xử lý Pull Request chỉ có dòng Xóa (Deletions Only):**
+   * Nếu PR chỉ xóa code (không có dòng thêm mới `+`), GitHub API không hỗ trợ ghim inline comment vào dòng không tồn tại ở file mới.
+   * **Giải pháp:** Hệ thống vẫn gửi diff cho LLM đánh giá logic, nhưng toàn bộ nhận xét được gom vào thân bài **Review Summary** tổng quát.
+3. **Cấu hình Secret cấp Repo vs Organization:**
+   * Khi cấu hình API Key trên GitHub, phải tạo ở mục **Repository secrets** (không tạo ở tab *Variables* và không tạo ở *Environment secrets* nếu workflow không khai báo môi trường).
+   * Workflow luôn sử dụng cú pháp `${{ secrets.KEY || vars.KEY }}` để phòng ngừa trường hợp dev tạo nhầm tab.
+4. **Văn hóa phối hợp giữa Người và AI:**
+   * AI là **người gác cổng sơ bộ (First-pass reviewer)**: Bắt lỗi cú pháp, leak tài nguyên, quên try-catch, lộ password, format mảng.
+   * Mentor / Senior Developer là **người quyết định cuối cùng**: Đánh giá kiến trúc tổng thể, luồng nghiệp vụ phức tạp và phê duyệt Merge code.
